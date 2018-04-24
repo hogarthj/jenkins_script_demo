@@ -35,7 +35,6 @@ jenkins_project_libraries: []
 
 jenkins_base_plugins:
   - active-directory
-  - ansicolor
   - cloudbees-bitbucket-branch-source
   - credentials-binding
   - embeddable-build-status
@@ -48,10 +47,6 @@ jenkins_base_plugins:
   - parameterized-trigger
   - ssh-slaves
   - workflow-aggregator
-  - slack
-  - timestamper
-  - view-job-filters
-  - ws-cleanup
   - blueocean
 
 jenkins_extra_plugins: []
@@ -73,6 +68,8 @@ jenkins_server_url: ''
 jenkins_node_config:
   'c7-jenkins-node':
     addr: "{{ hostvars['c7-jenkins-node']['ansible_default_ipv4']['address'] }}"
+    labels: example
+    execs: 2
 
 jenkins_node_default_config:
   type: ssh
@@ -90,8 +87,7 @@ jenkins_administrative_monitors:
   - monitor_name: 'CSRF Protection Monitor'
     enabled: false
 
-jenkins_update_plugins: false
-
+jenkins_update_plugins: true
 
 jenkins_system_message: |
   Demo of jenkins using ansible to deploy

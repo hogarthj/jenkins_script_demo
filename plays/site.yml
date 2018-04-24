@@ -19,12 +19,6 @@
 
 - hosts: nodes
   pre_tasks:
-    - name: add docker repo
-      yum_repository:
-        baseurl: https://download.docker.com/linux/centos/7/x86_64/stable/
-        gpgcheck: no
-        description: docker-ce repo
-        name: docker-ce
     - name: install the depednencies for the example
       yum:
         name:
@@ -32,5 +26,4 @@
           - make
           - openssl-devel
   roles:
-    - { role: docker }
     - { role: jenkins_node }
