@@ -1,0 +1,76 @@
+- name: Set default config
+  set_fact:
+    node_config:
+      type: "{{ jenkins_node_default_config.type }}"
+      addr: "{{ jenkins_node_default_config.addr }}"
+      execs: "{{ jenkins_node_default_config.execs }}"
+      labels: "{{ jenkins_node_default_config.labels }}"
+      command: "{{ jenkins_node_default_config.command }}"
+      mode: "{{ jenkins_node_default_config.mode | upper }}"
+      workdir: "{{ jenkins_node_default_config.workdir }}"
+      state: "{{ jenkins_node_default_config.state | default('present') }}"
+
+- name: apply specific node config
+  set_fact:
+    node_config:
+      type: "{{ jenkins_node_config[node_name].type | default(node_config.type) }}"
+      addr: "{{ jenkins_node_config[node_name].addr | default(node_config.addr) }}"
+      execs: "{{ jenkins_node_config[node_name].execs | default(node_config.execs) }}"
+      labels: "{{ jenkins_node_config[node_name].labels | default(node_config.labels) }}"
+      command: "{{ jenkins_node_config[node_name].command | default(node_config.command) }}"
+      mode: "{{ jenkins_node_config[node_name].mode | default(node_config.mode) | upper }}"
+      workdir: "{{ jenkins_node_config[node_name].workdir | default(node_config.workdir) }}"
+      state: "{{ jenkins_node_config[node_name].state | default(node_config.state) }}"
+  when: jenkins_node_config.get(node_name) != None
+
+  # automatically set the state to absent if the node is in the removed nodes list
+  # this is required if a node is removed from the hosts so it's no longer visible at all
+  # alternatively the node specific config can just be set to absent to temporarily remove it
+- name: absent a removed node
+  set_fact:
+    node_config: "{{ node_config | combine({'state': 'absent'})}}"
+  when: node_name in jenkins_removed_node_list
+
+- name: add the node "{{ node_name }}"
+  jenkins_script:
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    script:  "{{ lookup('file', 'scripts/add_node.groovy') }}"
+    args:
+      node_name: "{{ node_name }}"
+      node_type: "{{ node_config.type }}"
+      node_addr: "{{ node_config.addr }}"
+      node_command: "{{ node_config.command }}"
+      node_workdir: "{{ node_config.workdir }}"
+  when:
+    - jenkins_nodes.output.find(node_name) == -1
+    - node_config.state == 'present'
+  changed_when: true
+
+- name: configure node "{{ node_name }}"
+  jenkins_script:
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    script:  "{{ lookup('file', 'scripts/configure_node.groovy') }}"
+    args:
+      node_name: "{{ node_name }}"
+      node_execs: "{{ node_config.execs }}"
+      node_mode: "{{ node_config.mode }}"
+      node_labels: "{{ node_config.labels }}"
+  register: node_config_status
+  when: node_config.state == 'present'
+  changed_when: node_config_status.output.find("changed node configuration") != -1
+
+- name: remove node "{{ node_name }}"
+  jenkins_script:
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    script:  "{{ lookup('file', 'scripts/remove_node.groovy') }}"
+    args:
+      node_name: "{{ node_name }}"
+  when:
+    - jenkins_nodes.output.find(node_name) != -1
+    - node_config.state == 'absent'
+  changed_when: node_config_status.output.find("node removed") != -1
+
+

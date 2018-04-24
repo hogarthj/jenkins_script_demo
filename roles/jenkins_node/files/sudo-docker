@@ -1,0 +1,5 @@
+#!/bin/bash
+
+realdocker="$(which docker)"
+
+sudo ${realdocker} $@

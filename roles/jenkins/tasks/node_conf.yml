@@ -1,0 +1,99 @@
+- name: ensure .ssh directory exists for jenkins user
+  become: True
+  become_user: jenkins
+  file:
+    dest: ~/.ssh
+    state: directory
+    mode: 0700
+    owner: jenkins
+    group: jenkins
+
+- name: Auto generate sshkey for jenkins to node
+  become: True
+  become_user: jenkins
+  command: ssh-keygen -t rsa -N '' -f ~/.ssh/slave_key
+  args:
+    creates: ~/.ssh/slave_key
+  when: jenkins_master_node_private_key is not defined
+
+- name: Allow override with specific key
+  become: True
+  become_user: jenkins
+  copy:
+    content: "{{ jenkins_master_node_private_key }}"
+    dest: ~/.ssh/slave_key
+    owner: jenkins
+    group: jenkins
+    mode: 0600
+  when: jenkins_master_node_private_key is defined
+
+- name: lookup generated public key
+  command: cat ~jenkins/.ssh/slave_key.pub
+  register: public_node_key
+  changed_when: false
+  when: jenkins_master_node_private_key is not defined
+
+- name: install script used for nodes through a jump host
+  template:
+    src: jenkins_openssh_node.sh.j2
+    dest: "{{ jenkins_command_launcher }}"
+    mode: 0775
+
+- name: Set fact with the key found
+  set_fact:
+    jenkins_public_key: "{{ public_node_key.stdout }}"
+  when: public_node_key.stdout is defined
+
+- name: Set fact with a provided key instead
+  set_fact:
+    jenkins_public_key: jenkins_master_public_key
+  when: jenkins_master_public_key is defined
+
+- name: configure ssh client for jenkins user
+  blockinfile:
+    owner: jenkins
+    dest: ~jenkins/.ssh/config
+    mode: 0644
+    marker: "## {mark} ansible managed part {{ item.name }}"
+    create: yes
+    block: "{{ item.block }}"
+  with_items: "{{ jenkins_ssh_config | default([])}}"
+
+- name: add ssh keys for any jumping
+  copy:
+    src: "{{ item.srcname }}"
+    dest: "~jenkins/.ssh/{{ item.destname }}"
+    owner: jenkins
+    group: jenkins
+    mode: 0600
+    validate: timeout 5s ssh-keygen -y -f %s
+  with_items: "{{ jenkins_jump_keys | default([]) }}"
+
+- name: Add the ssh key to the jenkins instance as a valid credential
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_node_sshkey.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+  register: node_key_status
+  changed_when: node_key_status.output.find("changed node sshkey") != -1
+
+- name: Prevent jobs from selecting the master to run on automatically
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/setmaster_exclusive.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+  register: master_mode_status
+  changed_when: master_mode_status.output.find("changed master") != -1
+
+- name: Get current nodes
+  jenkins_script:
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    script: "return Jenkins.instance.getNodes().collect { it.name  }"
+  register: jenkins_nodes
+
+- name: Configure all nodes in jenkins
+  include_tasks: configure_node.yml
+  loop_control:
+    loop_var: node_name
+  with_items: "{{ jenkins_node_list + jenkins_removed_node_list }}"

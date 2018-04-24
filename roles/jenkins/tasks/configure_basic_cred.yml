@@ -1,0 +1,18 @@
+- name: Configure basic credential "{{ item.cred_desc }}"
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/configure_cred.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      cred_id: "{{ item.cred_id|default('') }}"
+      cred_desc: "{{ item.cred_desc }}"
+      cred_user: "{{ item.cred_user }}"
+      cred_pass: "{{ item.cred_pass }}"
+      cred_project: "{{ item.cred_project|default('') }}"
+      cred_state: "{{ item.cred_state|default('present')}}"
+      cred_type: 'userpass'
+      cred_text: ''
+      cred_filepath: ''
+      cred_filename: ''
+  register: basic_cred_status
+  changed_when: basic_cred_status.output.find("credential") != -1

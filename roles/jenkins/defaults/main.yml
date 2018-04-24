@@ -1,0 +1,103 @@
+jenkins_admin_user: admin
+jenkins_admin_pass: testpassword
+
+jenkins_permissions:
+  admins:
+    - admin
+  users: []
+
+jenkins_disable_master_slave_access_control: True
+
+jenkins_security: internal
+
+jenkins_max_trigger: 5m
+
+# -Dfoo options must be passed to java_opts JENKINS-12521
+jenkins_java_opts: '-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false'
+
+jenkins_args: ''
+
+jenkins_global_creds: []
+jenkins_global_file_secrets: []
+jenkins_global_text_secrets: []
+
+jenkins_projects: []
+
+jenkins_creds: []
+jenkins_file_secrets: []
+jenkins_text_secrets: []
+
+jenkins_jump_keys: []
+jenkins_ssh_config: []
+jenkins_whitelist_signatures: []
+jenkins_global_libraries: []
+jenkins_project_libraries: []
+
+jenkins_base_plugins:
+  - active-directory
+  - ansicolor
+  - cloudbees-bitbucket-branch-source
+  - credentials-binding
+  - embeddable-build-status
+  - git
+  - github-branch-source
+  - greenballs
+  - lockable-resources
+  - matrix-auth
+  - monitoring
+  - parameterized-trigger
+  - ssh-slaves
+  - workflow-aggregator
+  - slack
+  - timestamper
+  - view-job-filters
+  - ws-cleanup
+  - blueocean
+
+jenkins_extra_plugins: []
+
+jenkins_rooturl: "{{ ansible_fqdn }}"
+
+# This is the default formatter upstream, so match that in our defaults
+jenkins_markup_formatter: 'hudson.markup.EscapedMarkupFormatter'
+
+jenkins_node_group: nodes
+jenkins_node_list: "{{ groups[jenkins_node_group] | default([])}}"
+
+jenkins_removed_node_list: []
+
+jenkins_command_launcher: /usr/local/bin/jenkins_openssh_node.sh
+
+jenkins_server_url: ''
+
+jenkins_node_config:
+  'c7-jenkins-node':
+    addr: "{{ hostvars['c7-jenkins-node']['ansible_default_ipv4']['address'] }}"
+
+jenkins_node_default_config:
+  type: ssh
+  addr: "{{ node_name }}"
+  execs: 10
+  labels: docker
+  command: "{{ jenkins_command_launcher }}"
+  mode: normal
+  workdir: './jenkins-agent'
+  state: present
+
+jenkins_ad_domains: {}
+
+jenkins_administrative_monitors:
+  - monitor_name: 'CSRF Protection Monitor'
+    enabled: false
+
+jenkins_update_plugins: false
+
+
+jenkins_system_message: |
+  Demo of jenkins using ansible to deploy
+
+jenkins_auto_update:
+  disabled: yes
+  hour: 21
+  minute: 0
+  day: 0

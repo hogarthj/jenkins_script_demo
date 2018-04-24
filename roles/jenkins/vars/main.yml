@@ -1,0 +1,6 @@
+# this is set here as it's not configurable
+jenkins_secure: no
+
+jenkins_root_admin_auth: |
+  export JENKINS_USERNAME="{{ jenkins_admin_user }}"
+  export JENKINS_PASSWORD="{{ jenkins_admin_pass }}"

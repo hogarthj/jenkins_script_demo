@@ -1,0 +1,78 @@
+- name: create jenkins user
+  user:
+    name: jenkins
+    groups: dockerroot
+    shell: /bin/bash
+    createhome: yes
+
+- name: ensure jenkins home is owned by jenkins
+  file:
+    state: directory
+    owner: jenkins
+    group: jenkins
+    path: ~jenkins
+
+- name: ensure .ssh directory exists for jenkins user
+  file:
+    dest: ~jenkins/.ssh
+    state: directory
+    mode: 0700
+    owner: jenkins
+    group: jenkins
+
+- name: Install the required packages
+  package:
+    name:  "{{ jenkins_yum_packages }}"
+    state: present
+
+- name: copy skel files into place if they don't exist
+  become: True
+  become_user: jenkins
+  copy:
+    remote_src: True
+    src: "/etc/skel/{{ item }}"
+    dest: "~jenkins/{{ item }}"
+    force: no
+  with_items:
+    - ".bash_logout"
+    - ".bash_profile"
+    - ".bashrc"
+
+- name: Allow jenkins to connect
+  authorized_key:
+    user: jenkins
+    key: "{{ jenkins_node_master_key }}"
+  when: jenkins_node_master_key is defined
+
+- name: verify ssl cert for git
+  become: True
+  become_user: jenkins
+  git_config:
+    scope: global
+    name: http.sslVerify
+    value: true
+
+- name: configure git username
+  become: True
+  become_user: jenkins
+  git_config:
+    scope: global
+    name: user.name
+    value: 'jenkins'
+
+- name: configure git email
+  become: True
+  become_user: jenkins
+  git_config:
+    scope: global
+    name: user.email
+    value: "jenkins@{{ ansible_hostname }}"
+
+- name: enable git cache credential storage
+  become: True
+  become_user: jenkins
+  git_config:
+    scope: global
+    name: credential.helper
+    value: cache
+

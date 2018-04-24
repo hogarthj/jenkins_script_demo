@@ -1,0 +1,40 @@
+---
+- name: preallocate dockerroot group for consistency
+  group:
+    name: "{{ docker_group_name }}"
+    gid: "{{ docker_group_gid }}"
+    system: yes
+
+- name: install required packages
+  yum:
+    name:
+      - iptables
+      - docker-ce
+    state: present
+
+- name: Create /etc/docker directory
+  file:
+    path: /etc/docker
+    state: directory
+
+- name: add custom seccomp filter so systemd containers work
+  copy:
+    src: seccomp.json
+    dest: /etc/docker/seccomp.json
+  notify: restart docker
+
+- name: configure the default docker daemon config file
+  template:
+    src: "daemon.j2"
+    dest: /etc/docker/daemon.json
+  notify: restart docker
+
+- name: force all notified handlers to run at this point, not waiting for normal sync points
+  meta: flush_handlers
+
+- name: configure the service
+  service:
+    name: docker
+    state: "{{ docker_service_state }}"
+    enabled: "{{ docker_service_enabled }}"
+

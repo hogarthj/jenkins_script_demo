@@ -1,0 +1,10 @@
+jenkins_master_group: masters
+
+jenkins_node_master_key: "{{  hostvars[groups[jenkins_master_group][0]]['jenkins_public_key'] | default(omit) }}"
+
+jenkins_yum_packages:
+  - java-1.8.0-openjdk-headless
+  - git
+  - sudo
+  - wget
+

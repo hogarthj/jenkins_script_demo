@@ -1,0 +1,33 @@
+- name: Configure project "{{ project.project_name }}"
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/configure_project.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      server_url: "{{ project.server_url | default(jenkins_server_url) }}"
+      type:  "{{ project.type | default('bb') }}"
+      git_url: "{{ project.git_url | default('') }}"
+      project_name: "{{ project.project_name | mandatory }}"
+      cred_desc: "{{ project.cred_desc | mandatory }}"
+      max_trigger: "{{ project.max_trigger  | default(jenkins_max_trigger) }}"
+      daysToKeep: "{{ project.daysToKeep | default('30') }}"
+      numToKeep: "{{ project.numToKeep | default('100') }}"
+      discover_pr_from_origin: "{{ project.discover_pr_from_origin | default('false') }}"
+      discover_pr_from_forks: "{{ project.discover_pr_from_forks | default('false') }}"
+      enableWebhooks: "{{ project.enableWebhooks | default('true') }}"
+      state: "{{ project.state | default('present') }}"
+  register: project_create_status
+  changed_when: project_create_status.output is defined and project_create_status.output.find("project") != -1
+
+- name: Check if permissions are correct for "{{ project.project_name }}"
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_project_security.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      project_name: "{{ project.project_name }}"
+      permissions: "{{ project.permissions | default({}) | to_json }}"
+      state: "{{ project.state | default('present') }}"
+  register: project_permissions_status
+  when: (project.state is not defined) or ((project.state is defined) and (project.state == 'present'))
+  changed_when: project_permissions_status.output.find("changing project permissions") != -1

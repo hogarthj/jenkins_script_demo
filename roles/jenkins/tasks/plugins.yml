@@ -1,0 +1,119 @@
+- name: Get status of update data
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: http://127.0.0.1:8080/updateCenter/coreSource/api/json
+    return_content: yes
+    body_format: json
+    status_code: [200, 404]
+    timeout: 120
+  register: updatecenter_data
+
+- name: Refresh plugin update data
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: http://127.0.0.1:8080/pluginManager/checkUpdatesServer
+    method: POST
+    status_code: [200, 302]
+    body_format: json
+    timeout: 120
+  when: "( ansible_date_time.epoch|int - ( updatecenter_data.json.dataTimestamp|int // 1000 if updatecenter_data.json is defined else 0 ) ) >= 86400 "
+  changed_when: true
+
+- name: Get status of all plugins
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/pluginManager/api/json?depth=1"
+    return_content: yes
+    body_format: json
+  register: plugin_status
+
+- name: Install plugins
+  vars:
+    jqry: "[?shortName=='{{ item }}'].shortName"
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/pluginManager/install?plugin.{{ item }}.default=on"
+    method: POST
+    status_code: [200, 302]
+  when: plugin_status.json.plugins | json_query(jqry) | length == 0
+  changed_when: true
+  with_flattened:
+    - "{{ jenkins_base_plugins }}"
+    - "{{ jenkins_extra_plugins }}"
+
+- name: Update plugins
+  vars:
+    jqry: "[?hasUpdate].shortName"
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/pluginManager/install?plugin.{{ item }}.default=on"
+    method: POST
+    status_code: [200, 302]
+  with_items: "{{ plugin_status.json.plugins | json_query(jqry) }}"
+  changed_when: true
+  register: plugins_updated
+  when: jenkins_update_plugins == true
+
+- name: Wait for plugins to be installed
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/updateCenter/installStatus"
+    return_content: yes
+    body_format: json
+  register: plugin_status
+  until: "'Pending' not in plugin_status.json.data.jobs|map(attribute='installStatus')"
+  retries: 60
+  delay: 10
+
+- name: Check if we need to restart Jenkins to activate plugins
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/updateCenter/api/json?tree=restartRequiredForCompletion"
+    return_content: yes
+    body_format: json
+  register: jenkins_restart_required
+
+- name: Restart Jenkins to activate new plugins when it's safe to do so
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/safeRestart"
+    method: POST
+    status_code: [200, 302]
+  when: jenkins_restart_required.json.restartRequiredForCompletion|bool
+  changed_when: true
+
+- name: Wait for restart
+  include_tasks: ready_wait.yml
+
+- name: Refresh status of all plugins after updates
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/pluginManager/api/json?depth=1"
+    return_content: yes
+    body_format: json
+  register: plugin_status
+
+- name: Report if updates possible
+  vars:
+    jqry: "[?hasUpdate].shortName"
+  debug:
+    msg: "Plugin with updates: {{ plugin_status.json.plugins | json_query(jqry) }}"
+  changed_when: plugin_status.json.plugins | json_query(jqry) | length != 0

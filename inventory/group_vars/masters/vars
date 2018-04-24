@@ -1,0 +1,10 @@
+jenkins_projects:
+- cred_desc: 'gh_token'
+  project_name: hogarthj
+  type: gh
+
+jenkins_global_creds:
+- cred_desc: gh_token
+  cred_user: hogarthj
+  cred_pass: "{{ vault_gh_token }}"
+

@@ -1,0 +1,16 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]
+then
+  echo "Need to pass only the hostname to target as the argument"
+  exit 1
+fi
+targethost="$1"
+
+ssh -i ~/.ssh/slave_key jenkins@${targethost} ' \
+mkdir ~/jenkins-agent;
+cd ~/jenkins-agent ; \
+wget -O ./slave.jar --no-check-certificate https://{{ jenkins_rooturl }}/jnlpJars/slave.jar ; \
+/usr/bin/java -jar ./slave.jar'

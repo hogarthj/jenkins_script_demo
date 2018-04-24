@@ -1,0 +1,66 @@
+- name: Install jenkins and dependencies
+  package:
+    name: "{{ item }}"
+  with_items:
+    - jenkins
+    - java-1.8.0-openjdk
+    - git
+    - initscripts
+    - sudo
+    - openssh
+    - python-requests
+    - cronie
+- name: Disable wizards as args
+  template:
+    src: sysconfig_jenkins.j2
+    dest: /etc/sysconfig/jenkins
+  notify: restart jenkins
+- name: Add marker files to skip startup wizard
+  copy:
+    content: |
+      2.0
+    dest: ~jenkins/{{ item }}
+    force: no
+    owner: jenkins
+    group: jenkins
+    mode: 0755
+  with_items:
+    - jenkins.install.InstallUtil.lastExecVersion
+    - jenkins.install.UpgradeWizard.state
+- name: start jenkins service
+  service:
+    name: jenkins
+    state: started
+    enabled: yes
+
+- name: install jenkins upgrade script
+  copy:
+    src: upgrade_jenkins.py
+    dest: /usr/local/bin/upgrade_jenkins
+    mode: 0744
+    owner: root
+    group: root
+
+- name: add secure credentials for automated updates
+  copy:
+    content: "{{ jenkins_root_admin_auth }}"
+    dest: /root/.jenkins_admin_auth
+    owner: root
+    group: root
+    mode: 0400
+
+- name: schedule an automated update of the local jenkins
+  cron:
+    name: "automated upgrade of jenkins"
+    cron_file: automated_jenkins_upgrade
+    user: root
+    disabled: "{{ jenkins_auto_update.disabled }}"
+    hour: "{{ jenkins_auto_update.hour }}"
+    minute: "{{ jenkins_auto_update.minute }}"
+    weekday: "{{ jenkins_auto_update.day }}"
+    job: '/usr/bin/bash -c "source /root/.jenkins_admin_auth ; /usr/local/bin/upgrade_jenkins >> /var/log/jenkins_upgrade.log_$(date +\%d_\%m_\%Y) 2>&1"'
+
+- meta: flush_handlers
+
+- name: Wait for Jenkins to start
+  include_tasks: ready_wait.yml

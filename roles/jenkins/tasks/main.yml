@@ -1,0 +1,209 @@
+- name: Prevent run with local admin creds and non-internal users
+  fail:
+    msg: "Must provide jenkins_admin_user and jenkins_admin_pass with external auth"
+  when: jenkins_security != "internal" and jenkins_admin_user == "admin"
+
+- name: Check if config on disk
+  stat:
+    path: ~jenkins/config.xml
+  register: config_status
+
+- name: Read in current config
+  command: cat ~jenkins/config.xml
+  changed_when: False
+  register: jenkins_config_xml
+  when: config_status.stat.exists == True
+
+- name: Mark jenkins as secured
+  set_fact:
+    jenkins_secure: yes
+  when:
+    - config_status.stat.exists == True
+    - "'hudson.security.AuthorizationStrategy$Unsecured' not in jenkins_config_xml.stdout"
+
+- name: Install jenkins
+  include_tasks: install.yml
+
+- name: Configure security for master/slave access control
+  copy:
+    content: "{{ jenkins_disable_master_slave_access_control | bool | string | lower }}"
+    dest: ~jenkins/secrets/slave-to-master-security-kill-switch
+    owner: jenkins
+
+- name: set system message
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_system_message.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      system_message: "{{ jenkins_system_message }}"
+  register: system_message_status
+  changed_when: system_message_status.output.find("changed message") != -1
+
+- name: Handle plugins
+  include_tasks: plugins.yml
+
+- name: Wait for Jenkins to become available
+  include_tasks: ready_wait.yml
+
+- name: Use internal jenkins database
+  jenkins_script:
+    user: "{{ jenkins_admin_user if (jenkins_secure | bool == True) else omit }}"
+    password: "{{ jenkins_admin_pass if (jenkins_secure | bool == True) else omit }}"
+    script: "{{ lookup('file', 'scripts/security_internal.groovy') }}"
+    args:
+      admin_user: "{{ jenkins_admin_user }}"
+      admin_pass: "{{ jenkins_admin_pass }}"
+  when: jenkins_security == "internal"
+  register: internal_security_status
+  changed_when: internal_security_status.output.find("changing security") != -1
+
+- name: Use external active directory
+  jenkins_script:
+    user: "{{ jenkins_admin_user if (jenkins_secure | bool == True) else omit }}"
+    password: "{{ jenkins_admin_pass if (jenkins_secure | bool == True) else omit }}"
+    script: "{{ lookup('file', 'scripts/security_ad.groovy') }}"
+    args:
+      domains: "{{ jenkins_ad_domains | to_json }}"
+  when: jenkins_security == "ad"
+  register: ad_security_status
+  changed_when: ad_security_status.output.find("changing security") != -1
+
+- name: mark instance secured for rest of run
+  set_fact:
+    jenkins_secure: yes
+  changed_when: true
+  when: (internal_security_status is changed) or (ad_security_status is changed)
+
+- name: Configure Jenkins Global Permissions
+  jenkins_script:
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    script: "{{ lookup('file', 'scripts/security_global_perms.groovy') }}"
+    args:
+      permissions: "{{ jenkins_permissions | to_json }}"
+  register: global_perms_status
+  changed_when: global_perms_status.output.find("changing perms") != -1
+  when: jenkins_permissions is defined
+
+- name: Set RootURL correctly in the instance
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_rooturl.groovy')}}"
+    args:
+      rooturl: "https://{{ jenkins_rooturl }}/"
+    user: "{{ jenkins_admin_user  }}"
+    password: "{{ jenkins_admin_pass  }}"
+  register: rooturl_status
+  changed_when: rooturl_status.output.find("changed rooturl") != -1
+
+- name: node configuration
+  include_tasks: node_conf.yml
+
+- name: Configure any global user/pass credentials required
+  include_tasks: configure_basic_cred.yml
+  with_items: "{{ jenkins_global_creds | default([])}}"
+
+- name: Configure any global text secrets required
+  include_tasks: configure_text_secret.yml
+  with_items: "{{ jenkins_global_text_secrets | default([])}}"
+
+- name: Configure any global secret files required
+  include_tasks: configure_file_secrets.yml
+  with_items: "{{ jenkins_global_file_secrets | default([]) }}"
+
+- name: Project configuration
+  include_tasks: configure_project.yml
+  with_items: "{{ jenkins_projects }}"
+  loop_control:
+    loop_var: project
+    label: "{{ project.project_name }}"
+
+- name: Configure any project based user/pass credentials required
+  include_tasks: configure_basic_cred.yml
+  with_items: "{{ jenkins_creds | default([])}}"
+
+- name: Configure any project based text secrets required
+  include_tasks: configure_text_secret.yml
+  with_items: "{{ jenkins_text_secrets | default([])}}"
+
+- name: Configure any project based secret files required
+  include_tasks: configure_file_secrets.yml
+  with_items: "{{ jenkins_file_secrets | default([]) }}"
+
+- name: disable verify ssl cert for git
+  become: True
+  become_user: jenkins
+  git_config:
+    scope: global
+    name: http.sslVerify
+    value: True
+
+- name: Set markup formatter
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_markup_formatter.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      formatter_class: "{{ jenkins_markup_formatter }}"
+  register: markup_formatter_status
+  changed_when: markup_formatter_status.output.find('changed markup formatter') != -1
+
+- name: Add methods listed to whitelist
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/add_signature_approval.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      signature: "{{ item }}"
+  register: whitelist_status
+  with_items: "{{ jenkins_whitelist_signatures | default([]) }}"
+  changed_when: whitelist_status.output.find("added signature") != -1
+
+- name: Configure global libraries
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/configure_global_library.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      library_name: "{{ item.library_name|mandatory }}"
+      giturl: "{{ item.giturl|mandatory }}"
+      git_cred_id: "{{ item.git_cred_id|mandatory }}"
+      default_version: "{{ item.default_version|default('master') }}"
+      load_implicit: "{{ item.load_implicit|default('false') }}"
+      allow_version_override: "{{ item.allow_version_override|default('true')}}"
+      state: "{{item.state|default('present')}}"
+  register: global_library_status
+  with_items: "{{ jenkins_global_libraries }}"
+  changed_when: global_library_status.output.find("global library") != -1
+
+- name: Configure project based libraries
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/configure_project_library.groovy') }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      library_name: "{{ item.library_name|mandatory }}"
+      project_name: "{{ item.project_name|mandatory }}"
+      giturl: "{{ item.giturl|mandatory }}"
+      git_cred_id: "{{ item.git_cred_id|mandatory }}"
+      default_version: "{{ item.default_version|default('master') }}"
+      load_implicit: "{{ item.load_implicit|default('false') }}"
+      allow_version_override: "{{ item.allow_version_override|default('true')}}"
+      state: "{{item.state|default('present')}}"
+  with_items: "{{ jenkins_project_libraries }}"
+  register: project_library_status
+  changed_when: project_library_status.output.find("project library") != -1
+
+- name: Set administrative monitor in the instance
+  jenkins_script:
+    script: "{{ lookup('file', 'scripts/set_administrative_monitor.groovy')}}"
+    user: "{{ jenkins_admin_user  }}"
+    password: "{{ jenkins_admin_pass  }}"
+    args:
+      monitor_name: "{{ item.monitor_name|mandatory }}"
+      enabled: "{{ item.enabled|mandatory }}"
+  loop_control:
+    label: "{{ item.monitor_name }}"
+  with_items: "{{ jenkins_administrative_monitors }}"
+  register: administrative_monitor_status
+  changed_when: administrative_monitor_status.output.find("changed monitor") != -1
