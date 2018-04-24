@@ -1,7 +1,6 @@
 - name: create jenkins user
   user:
     name: jenkins
-    groups: dockerroot
     shell: /bin/bash
     createhome: yes
 
