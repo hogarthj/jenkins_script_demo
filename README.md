@@ -8,3 +8,8 @@ Update the config to point to your own github
 Fork my test_scenario if you want a basic Jenkinsfile to test against
 
 Docker is included here, but not used by test_scenario
+
+Run with:
+```
+ ansible-playbook -i inventory plays/site.yml
+```
